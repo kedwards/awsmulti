@@ -1,0 +1,359 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "BAstion Stack, Provides a simple bastion host"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Bastion Environment Configuration"
+        Parameters:
+          - RemoteAccessCIDR
+          - OperatorEMail
+          - KeyName
+    ParameterLabels:
+      RemoteAcessCIDR:
+        default: "CIDR address for remote connections"
+      OperatorEMail:
+        default: "Operator Email for Notifications"
+      KeyName:
+        default: "SSH key to use to connect to instances"
+Parameters:
+  RemoteAccessCIDR:
+    Description: Source that has SSH access to the bastion host. (i.e. 50.32.108.38/32)
+    Type: String
+    MinLength: 9
+    MaxLength: 18
+    Default: "70.75.56.37/32"
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  OperatorEMail:
+    Description: EMail address to notify if there are any scaling operations
+    Type: String
+    Default: "kedwards@kevinedwards.ca"
+    AllowedPattern: ([a-zA-Z0-9_\-\.]+)@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.)|(([a-zA-Z0-9\-]+\.)+))([a-zA-Z]{2,4}|[0-9]{1,3})(\]?)
+    ConstraintDescription: must be a valid email address.
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: "onica-key"
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+Mappings:
+  RegionMap: # amzn2-ami-hvm-2.0.20190313-x86_64-gp2 
+    us-east-1:
+      "AMALINUX" : "ami-0de53d8956e8dcf80"
+    us-east-2:
+      "AMALINUX" : "ami-02bcbb802e03574ba"
+    us-west-1:
+      "AMALINUX" : "ami-0019ef04ac50be30f"
+    us-west-2:
+      "AMALINUX" : "ami-061392db613a6357b"
+    ca-central-1:
+      "AMALINUX" : "ami-03338e1f67dae0168"
+  InstanceSize: "t2.micro"
+Resources:
+  # NotificationTopic:
+  #   Type: AWS::SNS::Topic
+  #   Properties:
+  #     Subscription:
+  #       - Endpoint: !Ref OperatorEMail
+  #         Protocol: email
+  # AutoScalingGroupBastion:
+  #   Type: AWS::AutoScaling::AutoScalingGroup
+  #   CreationPolicy:
+  #     ResourceSignal:
+  #       Timeout: "PT5M"
+  #       Count: !Ref DesiredCapacity
+  #   UpdatePolicy:
+  #     UpdatePolicy:
+  #     AutoScalingRollingUpdate:
+  #       MaxBatchSize: "1"
+  #       MinInstancesInService: "1"
+  #       PauseTime: "PT15M"
+  #       WaitOnResourceSignals: "true"
+  #   Properties:
+  #     Cooldown: "300"
+  #     DesiredCapacity: !Ref DesiredCapacity
+  #     HealthCheckGracePeriod: "300"
+  #     HealthCheckType: "ELB"
+  #     VPCZoneIdentifier:
+  #       - !Ref SubnetPrivateA
+  #       - !Ref SubnetPrivateB
+  #     LaunchConfigurationName: !Ref LaunchConfigurationBastion
+  #     TargetGroupARNs:
+  #       - !Ref TargetGroupBastion
+  #     MaxSize: !Ref MaxSize
+  #     MinSize: !Ref MinSize
+  #     NotificationConfigurations:
+  #       - TopicARN: !Ref NotificationTopic
+  #         NotificationTypes:
+  #           - autoscaling:EC2_INSTANCE_LAUNCH
+  #           - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+  #           - autoscaling:EC2_INSTANCE_TERMINATE
+  #           - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+  # LaunchConfigurationBastion:
+  #   Type: "AWS::AutoScaling::LaunchConfiguration"
+  #   Properties:
+  #     ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX]
+  #     InstanceType: !Ref InstanceSize
+  #     KeyName: !Ref KeyName
+  #     SecurityGroups:
+  #       - !Ref SecurityGroupLoadBalancerBastion
+  #     UserData:
+  #       "Fn::Base64":
+  #         !Sub |
+  #           #!/bin/bash
+  #           yum update -y aws-cfn-bootstrap
+  #           amazon-linux-extras -y install epel
+  #           /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchConfigurationBastion --configsets all --region ${AWS::Region}
+  #           yum -y update
+  #           /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AutoScalingGroupBastion --region ${AWS::Region}
+  #   Metadata:
+  #     AWS::CloudFormation::Init:
+  #       configSets:
+  #         all:
+  #           - "configure_cfn"
+  #       configure_cfn:
+  #         files:
+  #           /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+  #             content: !Sub |
+  #               [cfn-auto-reloader-hook]
+  #               triggers=post.update
+  #               path=Resources.LaunchConfigurationBastion.Metadata.AWS::CloudFormation::Init
+  #               action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchConfigurationBastion --configsets all --region ${AWS::Region}
+  #             mode: "000400"
+  #             owner: root
+  #             group: root
+  #           /etc/cfn/cfn-hup.conf:
+  #             content: !Sub |
+  #               [main]
+  #               stack=${AWS::StackId}
+  #               region=${AWS::Region}
+  #               verbose=true
+  #               interval=5
+  #             mode: "000400"
+  #             owner: root
+  #             group: root
+  #         services:
+  #           sysvinit:
+  #             cfn-hup:
+  #               enabled: "true"
+  #               ensureRunning: "true"
+  #               files:
+  #                 - "/etc/cfn/cfn-hup.conf"
+  #                 - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+  # LoadBalancerBastion:
+  #   Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  #   Properties:
+  #     IpAddressType: "ipv4"
+  #     Scheme: "internet-facing"
+  #     Subnets:
+  #       - !Ref SubnetPublicA
+  #       - !Ref SubnetPublicB
+  #     SecurityGroups:
+  #       - !Ref SecurityGroupLoadBalancerBastion
+  #     Tags: 
+  #     - Key: Name 
+  #       Value: !Join ["-", [!Ref "AWS::StackName", "alb" ]]
+  # TargetGroupBastion:
+  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #   Properties:
+  #     HealthCheckIntervalSeconds: 60
+  #     HealthCheckTimeoutSeconds: 15
+  #     Name: !Join ["-", [!Ref "AWS::StackName", "targetgrpbastion" ]]
+  #     Port: 80
+  #     Protocol: "HTTP"
+  #     VpcId: !ImportValue infra-vpcid
+  #     TargetType: "instance"
+  # ListenerBastion:
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   Properties: 
+  #     DefaultActions:
+  #       - TargetGroupArn: !Ref TargetGroupBastion
+  #         Type: "forward"
+  #     LoadBalancerArn: !Ref LoadBalancerBastion
+  #     Port: 80
+  #     Protocol: "HTTP"
+  # SecurityGroupLoadBalancerBastion:
+  #   Type: AWS::EC2::SecurityGroup
+  #   Properties:
+  #     GroupDescription: !Join ["", [!Ref "AWS::StackName", " Bastion" ]]
+  #     VpcId: !ImportValue infra-vpcid
+  #     SecurityGroupIngress:
+  #       - CidrIp: 0.0.0.0/0
+  #         IpProtocol: tcp
+  #         ToPort: "80"
+  #         FromPort: "80"
+  #     SecurityGroupEgress:
+  #       - CidrIp: 0.0.0.0/0
+  #         IpProtocol: "-1"
+  #         ToPort: "-1"
+  # ScalingPolicyBastionUp:
+  #   Type: AWS::AutoScaling::ScalingPolicy
+  #   Properties:
+  #     AdjustmentType: ChangeInCapacity
+  #     AutoScalingGroupName: !Ref AutoScalingGroupBastion
+  #     Cooldown: "60"
+  #     ScalingAdjustment: 1
+  # ScalingPolicyBastionDown:
+  #   Type: AWS::AutoScaling::ScalingPolicy
+  #   Properties:
+  #     AdjustmentType: ChangeInCapacity
+  #     AutoScalingGroupName: !Ref AutoScalingGroupBastion
+  #     Cooldown: "60"
+  #     ScalingAdjustment: -1
+  # CPUAlarmHigh:
+  #   Type: AWS::CloudWatch::Alarm
+  #   Properties:
+  #     AlarmDescription: Scale-up if CPU > 75% for 2 minutes
+  #     MetricName: CPUUtilization
+  #     Namespace: AWS/EC2
+  #     Statistic: Average
+  #     Period: 120
+  #     EvaluationPeriods: 2
+  #     Threshold: 75
+  #     AlarmActions: [!Ref ScalingPolicyBastionUp]
+  #     Dimensions:
+  #       - Name: AutoScalingGroupName
+  #         Value: !Ref AutoScalingGroupBastion
+  #     ComparisonOperator: GreaterThanThreshold
+  # CPUAlarmLow:
+  #   Type: AWS::CloudWatch::Alarm
+  #   Properties:
+  #     AlarmDescription: Scale-down if CPU < 50% for 2 minutes
+  #     MetricName: CPUUtilization
+  #     Namespace: AWS/EC2
+  #     Statistic: Average
+  #     Period: 120
+  #     EvaluationPeriods: 2
+  #     Threshold: 50
+  #     AlarmActions: [!Ref ScalingPolicyBastionDown]
+  #     Dimensions:
+  #       - Name: AutoScalingGroupName
+  #         Value: !Ref AutoScalingGroupBastion
+  #     ComparisonOperator: LessThanThreshold
+  # AutoSubnetCustomResource:
+  #   Type: "Custom::LambdaAutoSubnet"
+  #   Properties:
+  #     ServiceToken: !ImportValue infra-autosubnetarn
+  #     DynamoDBRegion: !Ref "AWS::Region"
+  #     DynamoDBTable: !ImportValue infra-autosubnetddbtablename
+  #     VPCCidr: !ImportValue infra-vpciprange
+  #     Debug: "true"
+  # SubnetPublicA:
+  #   Type: "AWS::EC2::Subnet"
+  #   Properties:
+  #     AvailabilityZone: !Select [0, !GetAZs ]
+  #     CidrBlock: !GetAtt AutoSubnetCustomResource.AppPublicCIDRA
+  #     MapPublicIpOnLaunch: "true"
+  #     VpcId: !ImportValue infra-vpcid
+  # SubnetPrivateA:
+  #   Type: "AWS::EC2::Subnet"
+  #   Properties:
+  #     AvailabilityZone: !Select [0, !GetAZs ]
+  #     CidrBlock: !GetAtt AutoSubnetCustomResource.AppPrivateCIDRA
+  #     MapPublicIpOnLaunch: false
+  #     VpcId: !ImportValue infra-vpcid
+  # SubnetPublicB:
+  #   Type: "AWS::EC2::Subnet"
+  #   Properties:
+  #     AvailabilityZone: !Select [1, !GetAZs ]
+  #     CidrBlock: !GetAtt AutoSubnetCustomResource.AppPublicCIDRB
+  #     MapPublicIpOnLaunch: "true"
+  #     VpcId: !ImportValue infra-vpcid
+  # SubnetPrivateB:
+  #   Type: "AWS::EC2::Subnet"
+  #   Properties:
+  #     AvailabilityZone: !Select [1, !GetAZs ]
+  #     CidrBlock: !GetAtt AutoSubnetCustomResource.AppPrivateCIDRB
+  #     MapPublicIpOnLaunch: false
+  #     VpcId: !ImportValue infra-vpcid
+  # SubnetRouteTableAssociatePublicA:
+  #   Type: "AWS::EC2::SubnetRouteTableAssociation"
+  #   DependsOn: SubnetPublicA
+  #   Properties:
+  #     RouteTableId: !ImportValue infra-publicrt
+  #     SubnetId: !Ref SubnetPublicA
+  # SubnetRouteTableAssociatePublicB:
+  #   Type: "AWS::EC2::SubnetRouteTableAssociation"
+  #   DependsOn: SubnetPublicB
+  #   Properties:
+  #     RouteTableId: !ImportValue infra-publicrt
+  #     SubnetId: !Ref SubnetPublicB
+  # SubnetRouteTableAssociatePrivateA:
+  #   Type: "AWS::EC2::SubnetRouteTableAssociation"
+  #   DependsOn: SubnetPrivateA
+  #   Properties:
+  #     RouteTableId: !ImportValue infra-privaterta
+  #     SubnetId: !Ref SubnetPrivateA
+  # SubnetRouteTableAssociatePrivateB:
+  #   Type: "AWS::EC2::SubnetRouteTableAssociation"
+  #   Properties:
+  #     RouteTableId: !ImportValue infra-privatertb
+  #     SubnetId: !Ref SubnetPrivateB
+  InstanceEC2Bastion:
+    Type: AWS::EC2::Instance
+    DeletionPolicy: Delete
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX]
+      InstanceType: !FindInMap [InstanceSize, !Ref Environment, EC2]
+      KeyName: !Ref KeyName
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeleteOnTermination: true
+          DeviceIndex: "0"
+          GroupSet: 
+            - !Ref SecurityGroupInstanceApp
+          SubnetId: !Ref SubnetPublicA
+      UserData:
+        "Fn::Base64":
+          !Sub |
+            #!/bin/bash
+            yum update -y aws-cfn-bootstrap
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource InstanceEC2Bastion --configsets all --region ${AWS::Region}
+            yum -y update
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource InstanceEC2Bastion --region ${AWS::Region}
+    CreationPolicy:
+      ResourceSignal:
+        Count: "1"
+        Timeout: PT15M
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          all:
+            - "configure_cfn"
+        configure_cfn:
+          files:
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.InstanceEC2Bastion.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource InstanceEC2Bastion --configsets all --region ${AWS::Region}
+              mode: "000400"
+              owner: root
+              group: root
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+                verbose=true
+                interval=5
+              mode: "000400"
+              owner: root
+              group: root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: "true"
+                ensureRunning: "true"
+                files:
+                  - "/etc/cfn/cfn-hup.conf"
+                  - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+Outputs:
+  EndpointApp:
+    Description: Application Address
+    Value: !Join ["", ["http://", !GetAtt LoadBalancerApp.DNSName, "/app.php"]]
+  # BastionDNSAddress:
+  #   Description: BastionHost SSH
+  #   Value: !Join ["", ["ssh -A -i ~/.ssh/onica-key.pem ec2-user@", !GetAtt InstanceEC2Bastion.PublicIp]]

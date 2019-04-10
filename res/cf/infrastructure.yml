@@ -1,0 +1,301 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Core Infrastructure Stack, core vpc infrastructure.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: VPC Network Configuration
+        Parameters:
+          - VpcClassB
+    ParameterLabels:
+      VpcClassB:
+        default: Class B Address
+Parameters:
+  VpcClassB:
+    Description: Enter the Class B (10.XXX.0.0/16) for this VPC
+    Type: Number
+    MinValue: 0
+    MaxValue: 255
+    ConstraintDescription: Must be a valid class B range [0-255]
+    Default: 22
+Resources:
+  VPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !Sub "10.${VpcClassB}.0.0/16"
+      Tags: 
+        - Key: Name 
+          Value: !Join ["-", [!Ref "AWS::StackName", "vpc" ]]
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Join ["-", [!Ref "AWS::StackName", "igw" ]]
+  VPCGatewayAttachment:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  SubnetPublicA:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Sub "10.${VpcClassB}.0.0/22"
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags: 
+        - Key: Name
+          Value: !Join ["-", [!Ref "AWS::StackName", "subneta" ]]
+        - Key: Access
+          Value: public
+  SubnetPublicB:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Sub "10.${VpcClassB}.4.0/22"
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags: 
+        - Key: Name
+          Value: !Join ["-", [!Ref "AWS::StackName", "subnetb" ]]
+        - Key: Access
+          Value: public
+  RouteTablePublic:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags: 
+        - Key: Name 
+          Value: !Join ["-", [!Ref "AWS::StackName", "publicrt" ]]
+  RouteTablePrivateA:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name 
+          Value: !Join ["-", [!Ref "AWS::StackName", "privaterta" ]]
+  RouteTablePrivateB:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name 
+          Value: !Join ["-", [!Ref "AWS::StackName", "privatertb" ]]
+  SubnetRouteTableAssociationPublicA:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref SubnetPublicA
+      RouteTableId: !Ref RouteTablePublic
+  SubnetRouteTableAssociationPublicB:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref SubnetPublicB
+      RouteTableId: !Ref RouteTablePublic
+  RouteInternetPublic:
+    Type: "AWS::EC2::Route"
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref RouteTablePublic
+  RoutePrivateA:
+    Type: "AWS::EC2::Route"
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+      RouteTableId: !Ref RouteTablePrivateA
+  RoutePrivateB:
+    Type: "AWS::EC2::Route"
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayB
+      RouteTableId: !Ref RouteTablePrivateB
+  # NetworkAclPublic:
+  #   Type: "AWS::EC2::NetworkAcl"
+  #   Properties:
+  #     VpcId: !Ref VPC
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Join ["-", [!Ref "AWS::StackName", "publicacl" ]]
+  # SubnetNetworkAclAssociationPublicA:
+  #   Type: "AWS::EC2::SubnetNetworkAclAssociation"
+  #   Properties:
+  #     SubnetId: !Ref SubnetPublicA
+  #     NetworkAclId: !Ref NetworkAclPublic
+  # SubnetNetworkAclAssociationPublicB:
+  #   Type: "AWS::EC2::SubnetNetworkAclAssociation"
+  #   Properties:
+  #     SubnetId: !Ref SubnetPublicB
+  #     NetworkAclId: !Ref NetworkAclPublic
+  # NetworkAclEntryPublicInAllowAll:
+  #   Type: "AWS::EC2::NetworkAclEntry"
+  #   Properties:
+  #     NetworkAclId: !Ref NetworkAclPublic
+  #     RuleNumber: 99
+  #     Protocol: -1
+  #     RuleAction: allow
+  #     Egress: false
+  #     CidrBlock: "0.0.0.0/0"
+  # NetworkAclEntryPublicOutAllowAll:
+  #   Type: "AWS::EC2::NetworkAclEntry"
+  #   Properties:
+  #     NetworkAclId: !Ref NetworkAclPublic
+  #     RuleNumber: 99
+  #     Protocol: -1
+  #     RuleAction: allow
+  #     Egress: true
+  #     CidrBlock: "0.0.0.0/0"
+  EIPNatGwA:
+    DependsOn: VPCGatewayAttachment
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: vpc
+  EIPNatGwB:
+    DependsOn: VPCGatewayAttachment
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: vpc
+  NatGatewayA:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId: !GetAtt EIPNatGwA.AllocationId
+      SubnetId: !Ref SubnetPublicA
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref "AWS::StackName", "natgwa" ]]
+  NatGatewayB:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId: !GetAtt EIPNatGwB.AllocationId
+      SubnetId: !Ref SubnetPublicB
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref "AWS::StackName", "natgwb" ]]
+  BucketAppRes:
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: Retain
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+          -  AllowedHeaders: ['*']
+             AllowedMethods: ['GET']
+             AllowedOrigins: ['*']
+             Id: rule1
+             MaxAge: '3000'
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        ErrorDocument: error.html
+        IndexDocument: index.html
+  BucketPolicyApp:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref BucketAppRes
+      PolicyDocument:
+        Statement:
+          -
+            Sid: "APP123"
+            Action:
+              - "s3:GetObject"
+            Effect: Allow
+            Resource: !Join ["", ["arn:aws:s3:::", !Ref BucketAppRes, "/*"]]
+            Principal:
+              AWS:
+                - "*"
+  BucketLambdaRes:
+    DeletionPolicy: Retain
+    Type: "AWS::S3::Bucket"
+    Properties:
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        ErrorDocument: error.html
+        IndexDocument: index.html
+  BucketPolicyLambda:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref BucketLambdaRes
+      PolicyDocument:
+        Statement:
+          -
+            Sid: "Lambda123"
+            Action:
+              - "s3:GetObject"
+            Effect: Allow
+            Resource: !Join ["", ["arn:aws:s3:::", !Ref BucketLambdaRes, "/*"]]
+            Principal:
+              AWS:
+                - "*"
+Outputs:
+  TemplateId:
+    Description: Template Id
+    Value: infra
+  TemplateVersion:
+    Description: Template Version
+    Value: 0.1.0
+  StackName:
+    Description: Stack Name
+    Value: !Ref "AWS::StackName"
+  VpcId:
+    Description: Virtual Private Cloud Id
+    Value: !Ref VPC
+    Export:
+      Name: infra-vpcid
+  VPCIpRange:
+    Description: IP Range of Infrastructure VPC
+    Value: !GetAtt VPC.CidrBlock
+    Export:
+      Name: infra-vpciprange
+  VPCReservedRange1:
+    Description: IP Range of Public SubnetA
+    Value: !Sub "10.${VpcClassB}.0.0/22"
+    Export:
+      Name: infra-vpcreservedrange1
+  VPCReservedRange2:
+    Description: IP Range of Public SubnetB
+    Value: !Sub "10.${VpcClassB}.4.0/22"
+    Export:
+      Name: infra-vpcreservedrange2
+  NatGatewayIdA:
+    Description: ID of NAT Gateway A
+    Value: !Ref NatGatewayA
+  NatGatewayIdB:
+    Description: ID of NAT Gateway B
+    Value: !Ref NatGatewayB    
+  RouteTablePublic:
+    Description: ID of Public Route Table
+    Value: !Ref RouteTablePublic
+    Export:
+      Name: infra-publicrt
+  RouteTablePrivateA:
+    Description: ID of Private Route Table A
+    Value: !Ref RouteTablePrivateA
+    Export:
+      Name: infra-privaterta
+  RouteTablePrivateB:
+    Description: ID of Private Route Table B
+    Value: !Ref RouteTablePrivateB
+    Export:
+      Name: infra-privatertb
+  AppBucketUrl:
+    Description: Infrastructure App Bucket
+    Value: !GetAtt BucketAppRes.WebsiteURL
+    Export:
+      Name: infra-appbucketurl
+  AppBucket:
+    Description: App Bucket Name
+    Value: !Ref BucketAppRes
+    Export:
+      Name: infra-appbucketname
+  LambdaBucketUrl:
+    Description: Infrastructure Lambda Bucket
+    Value: !GetAtt BucketLambdaRes.WebsiteURL
+    Export:
+      Name: infra-lambdabucketurl
+  LambdaBucket:
+    Description: Infrastructure Lambda Bucket
+    Value: !Ref BucketLambdaRes
+    Export:
+      Name: infra-lambdabucketname
+  

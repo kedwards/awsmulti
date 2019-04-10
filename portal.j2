@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Portal Admin</title>
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.7.21.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
+    <!-- <script src="http://wzrd.in/standalone/uuid%2Fv4@latest"></script>-->
+    <script type="text/javascript">
+      AWS.config.update({accessKeyId: '{{ SUPPORTAKID }}', secretAccessKey: '{{ SUPPORTSECRET }}'});
+      AWS.config.region = '{{ REGION }}';
+    </script>
+    <link href='http://fonts.googleapis.com/css?family=Playfair+Display' rel='stylesheet' type='text/css'>
+    <link href='http://fonts.googleapis.com/css?family=Muli' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.8.1/css/all.css" integrity="sha384-50oBUHEmvpQ+1lW4y57PTFmhCaXp0ML5d60M1M7uH2+nqUivzIebhndOJK28anvf" crossorigin="anonymous">
+    <style>
+      h1 {font: 400 60px/1.5 'Playfair Display', Georgia, serif;}
+      p {font: 400 16px/1.6 'Muli', Verdana, Helvetica, sans-serif;}
+    </style>
+  </head>
+  <body>
+    <div class="container-fluid">
+      <h1>Portal Admin</h1>
+      <p id="buttonsnboxes">
+        <script>
+          function provisionStack(envtype, appversion) {
+            var cloudformation = new AWS.CloudFormation();
+            var uuid = new Date().getMilliseconds(); // uuidv4();        
+            var stackname = "onica-" + uuid;
+            console.log(stackname);
+            
+            var param = {
+              StackName: stackname,
+              Parameters: [
+                {ParameterKey: 'Environment', ParameterValue: envtype, UsePreviousValue: false},
+                {ParameterKey: 'AppVersion', ParameterValue: appversion, UsePreviousValue: false}
+              ],
+              OnFailure: 'DO_NOTHING',
+              TemplateURL: 'https://s3.{{ REGION }}.amazonaws.com/{{ RESOURCEBUCKET }}/application.yml'
+            };
+
+            console.log(param)
+            
+            cloudformation.createStack(param, function(err,data){
+              if (err) {
+                console.log(err, err.stack); // an error occurred
+                document.getElementById("msg").innerHTML = "Error Occured.. Permissions ??";
+              } else {
+                listStacks()
+              }
+            });
+          }
+        </script>
+        <script>
+          function getStackInfo(stackname) {
+            const getNestedObject = (nestedObj, pathArr) => {
+              return pathArr.reduce((obj, key) => (obj && obj[key] !== 'undefined') ? obj[key] : undefined, nestedObj);
+            }
+                
+            var cloudformation = new AWS.CloudFormation();
+            var param = {
+              StackName: stackname
+            };
+
+            cloudformation.describeStacks(param, function(err, data) {
+              if (err) console.log(err, err.stack); // an error occurred
+              else {
+                var SshAddr = getNestedObject(data, ['Stacks', 0, 'Outputs', 0, 'OutputValue']);
+                var ElbAddr = getNestedObject(data, ['Stacks', 0, 'Outputs', 1, 'OutputValue']);
+                document.getElementById("msg").innerHTML = '<p><a href="' + ElbAddr + '" target="_blank">' + ElbAddr + '</a></p><br /><p>' + SshAddr + '</p>';
+              }
+            });
+          }
+            
+          function listStacks() {
+            var cloudformation = new AWS.CloudFormation();
+            var param ={
+              StackStatusFilter: [
+                'CREATE_IN_PROGRESS', 'CREATE_FAILED', 'CREATE_COMPLETE', 'ROLLBACK_IN_PROGRESS', 'ROLLBACK_FAILED',
+                'ROLLBACK_COMPLETE', 'DELETE_IN_PROGRESS', 'DELETE_FAILED', 'UPDATE_IN_PROGRESS', 'UPDATE_COMPLETE_CLEANUP_IN_PROGRESS',
+                'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_IN_PROGRESS', 'UPDATE_ROLLBACK_FAILED', 'UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS',
+                'UPDATE_ROLLBACK_COMPLETE', 'REVIEW_IN_PROGRESS'
+              ]
+            };
+            var stacks = cloudformation.listStacks(param, function(err, data) {
+              if (err) document.getElementById("msg").innerHTML = "Error Occured.. Permissions ??";
+              else {
+                console.log(data)
+                
+                var html = `
+                  <table class="table table-striped table-hover"><thead>
+                    <tr>
+                      <th scope="col">Stack #</th>
+                      <th scope="col">StackName</th>
+                      <th scope="col">Creation Time</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Link</th>
+                      <th scope="col">Delete</th>
+                    </tr>
+                  </thead>
+                `;
+
+                jQuery.each(data.StackSummaries, function(index,obj) {
+                  if (obj.StackName.startsWith("onica-")) {                    
+                    html+= `
+                      <tbody>
+                        <tr>
+                          <th scope="row">${index+1}</th>
+                          <td>${obj.StackName}</td>
+                          <td>${obj.CreationTime}</td>
+                          <td>${obj.StackStatus}</td>
+                          <td><button class=\"btn btn-success\" onclick=\"getStackInfo('${obj.StackName}'); listStacks();\">App</button></td>
+                          <td><button class=\"btn btn-danger\" onclick=\"deleteStack('${obj.StackName}')\">Delete</button></td>
+                        </tr>
+                    `;
+                  }
+                })
+                html += "</table>"
+                jQuery("#results").html(html)
+              }
+            })
+          }
+        </script>
+        <script>
+          function deleteStack(stackname) {
+            var cloudformation = new AWS.CloudFormation();
+            var param = {
+              StackName: stackname
+            };
+            cloudformation.deleteStack(param, function(err, data) {
+              if (err) console.log(err, err.stack); // an error occurred
+              else     {
+                console.log(data)
+                listStacks()
+              }
+            });
+          }
+        </script>
+        <script>
+          function deleteStack(stackname) {
+            var cloudformation = new AWS.CloudFormation();
+            var param = {
+              StackName: stackname
+            };
+            cloudformation.deleteStack(param, function(err, data) {
+              if (err) console.log(err, err.stack); // an error occurred
+              else     {
+                console.log(data)
+                listStacks()
+              }
+            });
+          }
+        </script>
+        <script>
+          function listApps() {
+            // list apps available in app bucket and update provisioning table
+            var cloudformation = new AWS.CloudFormation();
+            var s3 = new AWS.S3();
+            var params = {};
+            var params2 = {};
+            cloudformation.listExports(params, function(err, data) {
+              if (err) console.log(err, err.stack); // an error occurred
+              else     {
+                console.log(data);           // successful - debug to console
+                var appbucketname=''
+                arr=data.Exports
+                for (var i=0, iLen=arr.length; i<iLen; i++) {
+                  if (arr[i].Name == 'infra-appbucketname') appbucketname=arr[i].Value;
+                }
+                console.log(appbucketname)
+                var appversions = []
+                var params2 = {Bucket: appbucketname, MaxKeys: '50'}
+                s3.listObjectsV2(params2, function(err, data){
+                  console.log(data)
+                  arr=data.Contents
+                  for (var i=0, iLen=arr.length; i<iLen; i++) {
+                    if (arr[i].Key.startsWith("app")) {
+                      appversions.push(arr[i].Key.split(".")[0].split("app")[1])
+                    }
+                  }
+
+                  var html = `
+                    <table class="table table-striped table-hover">
+                      <thead>
+                        <tr>
+                          <th scope="col">Version #</th>
+                          <th colspan="4" scope="col">Choose an application version, and an environment to deploy.</th>
+                        </tr>
+                      </thead>
+                  `;
+
+
+                  for (var i=0, iLen=appversions.length; i<iLen; i++){
+                    html+= `
+                      <tbody>
+                        <tr>
+                          <th scope="row">${appversions[i]}</th>
+                          <td><button class=\"btn btn-success\" onclick=\"provisionStack('DEV', '${appversions[i]}')\">DEV</button></td>
+                          <td><button class=\"btn btn-info\" onclick=\"provisionStack('TEST', '${appversions[i]}')\">TEST</button></td>
+                          <td><button class=\"btn btn-warning\" onclick=\"provisionStack('QA', '${appversions[i]}')\">QA</button></td>
+                          <td><button class=\"btn btn-secondary\"onclick=\"provisionStack('PROD', '${appversions[i]}')\">PROD</button></td>
+                        </tr>
+                    `;
+                  }
+
+                  html += "</table>"
+                  console.log(html)
+                  jQuery("#provarea").html(html)
+                })
+              }
+            });
+            // update list of stacks
+            listStacks()
+          }
+        </script>
+      <button type="button" class="btn btn-primary" onclick="listStacks()">Refresh Environments</button>
+      </p>
+      <p id="msg"> 
+      </p>
+      <p id="results"> 
+      </p>
+      <p id="provarea">
+      </p>
+    </div>
+  </body>
+</html>
+<script>listStacks()</script>
+<script>listApps()</script>

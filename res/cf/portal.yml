@@ -1,0 +1,62 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Portal Stack, IAM and Buckets for Admin Portal."
+Resources:
+  iamuser:
+    Type: "AWS::IAM::User"
+    Properties:
+      UserName: onicaportaluser
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AdministratorAccess"
+      LoginProfile:
+        Password: "P@55w0rd"
+        PasswordResetRequired: false
+  iamkeys:
+    DependsOn: iamuser
+    Type: "AWS::IAM::AccessKey"
+    Properties:
+      UserName: onicaportaluser
+  BucketPortalRes:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+          -  AllowedHeaders: ['*']
+             AllowedMethods: ['GET']
+             AllowedOrigins: ['*']
+             Id: rule1
+             MaxAge: '3000'
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        ErrorDocument: error.html
+        IndexDocument: index.html
+  BucketPolicyPortal:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref BucketPortalRes
+      PolicyDocument:
+        Statement:
+          -
+            Sid: "PORTAL123"
+            Action:
+              - "s3:GetObject"
+            Effect: Allow
+            Resource: !Join ["", ["arn:aws:s3:::", !Ref BucketPortalRes, "/*"]]
+            Principal:
+              AWS:
+                - "*"
+Outputs:
+  PortalBucket:
+    Description: Portal Bucket
+    Value: !Ref BucketPortalRes
+    Export:
+      Name: portal-portalbucketname
+  PortalBucketUrlEndpoint:
+    Description: Portal Bucket URL
+    Value: !Sub ${BucketPortalRes.WebsiteURL}/portal.html
+  AdminAccessKeyId:
+    Description: Portal Access Key ID
+    Value: !Ref iamkeys
+  AdminSecretKey:
+    Description: Portal Secret Access Key
+    Value: !GetAtt iamkeys.SecretAccessKey

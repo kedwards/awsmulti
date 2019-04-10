@@ -1,0 +1,126 @@
+---
+- hosts: local
+  gather_facts: false
+  vars:
+    vpc_classb_network: "{{ vpc_classb | default('22') }}"
+    infra_stack_name: "{{ infra_name | default('infrastructure') }}"
+    portal_stack_name: "{{ portal_name | default('portal') }}"
+    portal_password: "{{ portal_pass | default('OnicaTest') }}"
+    remote_access_ipaddress: "{{ local_ip | default('184.64.189.251/24') }}"    
+    aws_access_key: "{{ lookup('env','AWS_ACCESS_KEY_ID') }}"
+    aws_secret_key: "{{ lookup('env','AWS_SECRET_ACCESS_KEY') }}"
+    aws_key_name: "{{ key_name | default('onica') }}"
+    aws_region: "{{ vpc_region | default('ca-central-1') }}"
+  tasks:
+    - name: Create a new EC2 key
+      ec2_key:
+        name: onica
+        region: ca-central-1
+      register: ec2_key_result
+    - name: Save private key
+      copy:
+        content: "{{ ec2_key_result.key.private_key }}"
+        dest: "~/.ssh/{{ aws_key_name }}.pem"
+        mode: "0600"
+      when: ec2_key_result.changed
+    - name: Create Infrastructure Stack
+      cloudformation:
+        stack_name: "{{ infra_stack_name }}"
+        state: "present"
+        region: "{{ aws_region }}"
+        template: "./res/cf/infrastructure.yml"
+        template_parameters:
+          VpcClassB: "{{ vpc_classb_network }}"
+        tags:
+          Stack: "ansible-cloudformation-infrastructure"
+    - name: Get Cloudformation Stack Facts
+      cloudformation_facts:
+        stack_name: "{{ infra_stack_name }}"
+        region: "{{ aws_region }}"
+      register: infra_stack
+    - name: Sync Application / Test folders to S3
+      s3_sync:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ aws_region }}"
+        bucket: "{{ infra_stack.ansible_facts.cloudformation[infra_stack_name].stack_outputs.AppBucket }}"
+        file_root: ./res/s3/web
+        file_change_strategy: force
+        permission: public-read
+        cache_control: "public, max-age=31536000"
+    - name: Sync AutoSubnetLambda code to S3
+      s3_sync:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ aws_region }}"
+        bucket: "{{ infra_stack.ansible_facts.cloudformation[infra_stack_name].stack_outputs.LambdaBucket }}"
+        file_root: ./res/s3/autosubnet
+        file_change_strategy: force
+        permission: public-read
+        cache_control: "public, max-age=31536000"
+    - name: Create Autosubnet Stack
+      cloudformation:
+        stack_name: "autosubnet"
+        state: "present"
+        region: "{{ aws_region }}"
+        template: "./res/cf/autosubnet.yml"
+        tags:
+          Stack: "ansible-cloudformation-autosubnet"
+    - name: Create Portal Stack
+      cloudformation:
+        stack_name: "{{ portal_stack_name }}"
+        state: "present"
+        region: "{{ aws_region }}"
+        template: "./res/cf/portal.yml"
+        tags:
+          Stack: "ansible-cloudformation-portal"
+      tags:
+        - portal
+    - name: Get Cloudformation Stack Facts
+      cloudformation_facts:
+        stack_name: "{{ portal_stack_name }}"
+        region: "{{ aws_region }}"
+      register: portal_stack
+      tags:
+        - portal
+    - set_fact: SUPPORTAKID="{{ portal_stack.ansible_facts.cloudformation[portal_stack_name].stack_outputs.AdminAccessKeyId }}"
+      tags:
+        - portal
+    - set_fact: SUPPORTSECRET="{{ portal_stack.ansible_facts.cloudformation[portal_stack_name].stack_outputs.AdminSecretKey }}"
+      tags:
+        - portal
+    - set_fact: REGION="{{ aws_region }}"
+      tags:
+        - portal
+    - set_fact: RESOURCEBUCKET="{{ portal_stack.ansible_facts.cloudformation[portal_stack_name].stack_outputs.PortalBucket }}"
+      tags:
+        - portal
+    - name: Configure Portal
+      template:
+        src: ./portal.j2
+        dest: ./res/s3/portal/portal.html
+      tags:
+        - portal
+    - name: Protect Portal Page
+      shell: "python3 encrypt.py ./res/s3/portal/portal.html {{ portal_password }}"
+      tags:
+        - portal
+    - name: Rename Protected Portal Page
+      shell: mv ./res/s3/portal/portal-protected.html ./res/s3/portal/portal.html
+      tags:
+        - portal
+    - name: Sync Portal code to S3
+      s3_sync:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ aws_region }}"
+        bucket: "{{ portal_stack.ansible_facts.cloudformation[portal_stack_name].stack_outputs.PortalBucket }}"
+        file_root: ./res/s3/portal
+        file_change_strategy: force
+        permission: public-read
+        cache_control: "public, max-age=31536000"
+      tags:
+        - portal
+    - name: Portal Application Url
+      debug:
+        msg: "{{ portal_stack.ansible_facts.cloudformation[portal_stack_name].stack_outputs.PortalBucketUrlEndpoint }}"

@@ -6,7 +6,7 @@
     infra_stack_name: "{{ infra_name | default('infrastructure') }}"
     portal_stack_name: "{{ portal_name | default('portal') }}"
     portal_password: "{{ portal_pass | default('OnicaTest') }}"
-    remote_access_ipaddress: "{{ local_ip | default('184.64.189.251/24') }}"    
+    remote_access_ipaddress: "{{ local_ip | default('0.0.0.0/0"
     aws_access_key: "{{ lookup('env','AWS_ACCESS_KEY_ID') }}"
     aws_secret_key: "{{ lookup('env','AWS_SECRET_ACCESS_KEY') }}"
     aws_key_name: "{{ key_name | default('onica') }}"
